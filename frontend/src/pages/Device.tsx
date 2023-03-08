@@ -53,7 +53,10 @@ import type { Device_networkInterfaces$key } from "api/__generated__/Device_netw
 import type { Device_otaOperations$key } from "api/__generated__/Device_otaOperations.graphql";
 import type { Device_otaOperations_refreshQuery } from "api/__generated__/Device_otaOperations_refreshQuery.graphql";
 import type { Device_cellularConnection$key } from "api/__generated__/Device_cellularConnection.graphql";
-import type { Device_getDevice_Query } from "api/__generated__/Device_getDevice_Query.graphql";
+import type {
+  Device_getDevice_Query,
+  Device_getDevice_Query$data,
+} from "api/__generated__/Device_getDevice_Query.graphql";
 import type { Device_createManualOtaOperation_Mutation } from "api/__generated__/Device_createManualOtaOperation_Mutation.graphql";
 import type { Device_updateDevice_Mutation } from "api/__generated__/Device_updateDevice_Mutation.graphql";
 import type { Device_getExistingDeviceTags_Query } from "api/__generated__/Device_getExistingDeviceTags_Query.graphql";
@@ -215,38 +218,41 @@ const DEVICE_NETWORK_INTERFACES__FRAGMENT = graphql`
 
 const GET_DEVICE_QUERY = graphql`
   query Device_getDevice_Query($id: ID!) {
-    device(id: $id) {
+    node(id: $id) {
+      __typename
       id
-      deviceId
-      lastConnection
-      lastDisconnection
-      name
-      online
-      capabilities
-      systemModel {
+      ... on Device {
+        deviceId
+        lastConnection
+        lastDisconnection
         name
-        pictureUrl
-        hardwareType {
+        online
+        capabilities
+        systemModel {
+          name
+          pictureUrl
+          hardwareType {
+            name
+          }
+        }
+        tags
+        deviceGroups {
+          id
           name
         }
+        ...Device_hardwareInfo
+        ...Device_baseImage
+        ...Device_osInfo
+        ...Device_runtimeInfo
+        ...Device_location
+        ...Device_storageUsage
+        ...Device_systemStatus
+        ...Device_wifiScanResults
+        ...Device_batteryStatus
+        ...Device_otaOperations
+        ...Device_cellularConnection
+        ...Device_networkInterfaces
       }
-      tags
-      deviceGroups {
-        id
-        name
-      }
-      ...Device_hardwareInfo
-      ...Device_baseImage
-      ...Device_osInfo
-      ...Device_runtimeInfo
-      ...Device_location
-      ...Device_storageUsage
-      ...Device_systemStatus
-      ...Device_wifiScanResults
-      ...Device_batteryStatus
-      ...Device_otaOperations
-      ...Device_cellularConnection
-      ...Device_networkInterfaces
     }
   }
 `;
@@ -953,13 +959,12 @@ const DeviceBatteryTab = ({ deviceRef }: DeviceBatteryTabProps) => {
   );
 };
 
-type SoftwareUpdateTabContentProps = {
+type SoftwareUpdateTabProps = {
   deviceRef: Device_otaOperations$key;
 };
 
-const SoftwareUpdateTabContent = ({
-  deviceRef,
-}: SoftwareUpdateTabContentProps) => {
+const SoftwareUpdateTab = ({ deviceRef }: SoftwareUpdateTabProps) => {
+  const intl = useIntl();
   const [errorFeedback, setErrorFeedback] = useState<React.ReactNode>(null);
 
   // TODO: use GraphQL subscription (when available) to get updates about OTA operation
@@ -1038,66 +1043,6 @@ const SoftwareUpdateTabContent = ({
   };
 
   return (
-    <div className="mt-3">
-      <h5>
-        <FormattedMessage
-          id="pages.Device.SoftwareUpdateTab.manualOTAUpdate"
-          defaultMessage="Manual OTA Update"
-        />
-      </h5>
-      <Alert
-        show={!!errorFeedback}
-        variant="danger"
-        onClose={() => setErrorFeedback(null)}
-        dismissible
-      >
-        {errorFeedback}
-      </Alert>
-      {currentOperation ? (
-        <div className="mt-3">
-          <FormattedMessage
-            id="pages.Device.SoftwareUpdateTab.updatingTo"
-            defaultMessage="Updating to image <a>{baseImageName}</a>"
-            values={{
-              a: (chunks: React.ReactNode) => (
-                <a
-                  target="_blank"
-                  rel="noreferrer"
-                  href={currentOperation.baseImageUrl}
-                >
-                  {chunks}
-                </a>
-              ),
-              baseImageName: currentOperation.baseImageUrl.split("/").pop(),
-            }}
-          />
-        </div>
-      ) : (
-        <BaseImageForm
-          className="mt-3"
-          onSubmit={launchManualOTAUpdate}
-          isLoading={isCreatingOtaOperation}
-        />
-      )}
-      <h5 className="mt-4">
-        <FormattedMessage
-          id="pages.Device.SoftwareUpdateTab.updatesHistory"
-          defaultMessage="History"
-        />
-      </h5>
-      <OperationTable deviceRef={device} />
-    </div>
-  );
-};
-
-type SoftwareUpdateTabProps = {
-  deviceRef: Device_otaOperations$key;
-};
-
-const SoftwareUpdateTab = ({ deviceRef }: SoftwareUpdateTabProps) => {
-  const intl = useIntl();
-
-  return (
     <Tab
       eventKey="device-software-update-tab"
       title={intl.formatMessage({
@@ -1105,15 +1050,55 @@ const SoftwareUpdateTab = ({ deviceRef }: SoftwareUpdateTabProps) => {
         defaultMessage: "Software Updates",
       })}
     >
-      <Suspense
-        fallback={
-          <Center data-testid="page-loading">
-            <Spinner />
-          </Center>
-        }
-      >
-        <SoftwareUpdateTabContent deviceRef={deviceRef} />
-      </Suspense>
+      <div className="mt-3">
+        <h5>
+          <FormattedMessage
+            id="pages.Device.SoftwareUpdateTab.manualOTAUpdate"
+            defaultMessage="Manual OTA Update"
+          />
+        </h5>
+        <Alert
+          show={!!errorFeedback}
+          variant="danger"
+          onClose={() => setErrorFeedback(null)}
+          dismissible
+        >
+          {errorFeedback}
+        </Alert>
+        {currentOperation ? (
+          <div className="mt-3">
+            <FormattedMessage
+              id="pages.Device.SoftwareUpdateTab.updatingTo"
+              defaultMessage="Updating to image <a>{baseImageName}</a>"
+              values={{
+                a: (chunks: React.ReactNode) => (
+                  <a
+                    target="_blank"
+                    rel="noreferrer"
+                    href={currentOperation.baseImageUrl}
+                  >
+                    {chunks}
+                  </a>
+                ),
+                baseImageName: currentOperation.baseImageUrl.split("/").pop(),
+              }}
+            />
+          </div>
+        ) : (
+          <BaseImageForm
+            className="mt-3"
+            onSubmit={launchManualOTAUpdate}
+            isLoading={isCreatingOtaOperation}
+          />
+        )}
+        <h5 className="mt-4">
+          <FormattedMessage
+            id="pages.Device.SoftwareUpdateTab.updatesHistory"
+            defaultMessage="History"
+          />
+        </h5>
+        <OperationTable deviceRef={device} />
+      </div>
     </Tab>
   );
 };
@@ -1188,18 +1173,41 @@ const DeviceContent = ({
   refreshTags,
 }: DeviceContentProps) => {
   const { deviceId = "" } = useParams();
-  const deviceData = usePreloadedQuery(GET_DEVICE_QUERY, getDeviceQuery);
+  const { node } = usePreloadedQuery(GET_DEVICE_QUERY, getDeviceQuery);
   const tagsData = usePreloadedQuery(GET_TAGS_QUERY, getTagsQuery);
 
   // TODO: handle readonly type without mapping to mutable type
-  const device = useMemo(
-    () =>
-      deviceData.device && {
-        ...deviceData.device,
-        tags: deviceData.device.tags.slice(),
-      },
-    [deviceData.device]
-  );
+  const device: Required<Device_getDevice_Query$data["node"]> | null =
+    useMemo(() => {
+      if (
+        node &&
+        node.__typename === "Device" &&
+        node.capabilities !== undefined &&
+        node.deviceGroups !== undefined &&
+        node.deviceId !== undefined &&
+        node.lastConnection !== undefined &&
+        node.lastDisconnection !== undefined &&
+        node.name !== undefined &&
+        node.online !== undefined &&
+        node.systemModel !== undefined &&
+        node.tags !== undefined
+      ) {
+        const deviceData: Required<Device_getDevice_Query$data["node"]> = {
+          ...node,
+          capabilities: node.capabilities,
+          deviceGroups: node.deviceGroups,
+          deviceId: node.deviceId,
+          lastConnection: node.lastConnection,
+          lastDisconnection: node.lastDisconnection,
+          name: node.name,
+          online: node.online,
+          systemModel: node.systemModel,
+          tags: node.tags.slice(),
+        };
+        return deviceData;
+      }
+      return null;
+    }, [node]);
 
   const [deviceDraft, setDeviceDraft] = useState(
     _.pick(device, ["name", "tags"])
