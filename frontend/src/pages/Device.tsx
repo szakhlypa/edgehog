@@ -30,6 +30,7 @@ import { ErrorBoundary } from "react-error-boundary";
 import graphql from "babel-plugin-relay/macro";
 import {
   useFragment,
+  useRefetchableFragment,
   usePreloadedQuery,
   useQueryLoader,
   PreloadedQuery,
@@ -50,6 +51,7 @@ import type { Device_systemStatus$key } from "api/__generated__/Device_systemSta
 import type { Device_wifiScanResults$key } from "api/__generated__/Device_wifiScanResults.graphql";
 import type { Device_networkInterfaces$key } from "api/__generated__/Device_networkInterfaces.graphql";
 import type { Device_otaOperations$key } from "api/__generated__/Device_otaOperations.graphql";
+import type { Device_otaOperations_refreshQuery } from "api/__generated__/Device_otaOperations_refreshQuery.graphql";
 import type { Device_cellularConnection$key } from "api/__generated__/Device_cellularConnection.graphql";
 import type { Device_getDevice_Query } from "api/__generated__/Device_getDevice_Query.graphql";
 import type { Device_createManualOtaOperation_Mutation } from "api/__generated__/Device_createManualOtaOperation_Mutation.graphql";
@@ -171,7 +173,8 @@ const DEVICE_BATTERY_STATUS_FRAGMENT = graphql`
 `;
 
 const DEVICE_OTA_OPERATIONS_FRAGMENT = graphql`
-  fragment Device_otaOperations on Device {
+  fragment Device_otaOperations on Device
+  @refetchable(queryName: "Device_otaOperations_refreshQuery") {
     id
     capabilities
     otaOperations {
@@ -950,22 +953,24 @@ const DeviceBatteryTab = ({ deviceRef }: DeviceBatteryTabProps) => {
   );
 };
 
-type SoftwareUpdateTabProps = {
+type SoftwareUpdateTabContentProps = {
   deviceRef: Device_otaOperations$key;
 };
 
-const SoftwareUpdateTab = ({ deviceRef }: SoftwareUpdateTabProps) => {
+const SoftwareUpdateTabContent = ({
+  deviceRef,
+}: SoftwareUpdateTabContentProps) => {
   const [errorFeedback, setErrorFeedback] = useState<React.ReactNode>(null);
-  const intl = useIntl();
-  const device = useFragment(DEVICE_OTA_OPERATIONS_FRAGMENT, deviceRef);
+
+  // TODO: use GraphQL subscription (when available) to get updates about OTA operation
+  const [device, refetch] = useRefetchableFragment<
+    Device_otaOperations_refreshQuery,
+    Device_otaOperations$key
+  >(DEVICE_OTA_OPERATIONS_FRAGMENT, deviceRef);
   const [createOtaOperation, isCreatingOtaOperation] =
     useMutation<Device_createManualOtaOperation_Mutation>(
       DEVICE_CREATE_MANUAL_OTA_OPERATION_MUTATION
     );
-
-  if (!device.capabilities.includes("SOFTWARE_UPDATES")) {
-    return null;
-  }
 
   const currentOperations = device.otaOperations
     .filter(
@@ -976,6 +981,20 @@ const SoftwareUpdateTab = ({ deviceRef }: SoftwareUpdateTabProps) => {
 
   // For now devices only support 1 update operation at a time
   const currentOperation = currentOperations?.[0] || null;
+
+  useEffect(() => {
+    if (!currentOperation) {
+      return;
+    }
+    const refetchTimerId = setTimeout(() => {
+      refetch({}, { fetchPolicy: "store-and-network" });
+    }, 10000);
+    return () => clearTimeout(refetchTimerId);
+  }, [refetch, currentOperation]);
+
+  if (!device.capabilities.includes("SOFTWARE_UPDATES")) {
+    return null;
+  }
 
   const launchManualOTAUpdate = (file: File) => {
     createOtaOperation({
@@ -1019,6 +1038,66 @@ const SoftwareUpdateTab = ({ deviceRef }: SoftwareUpdateTabProps) => {
   };
 
   return (
+    <div className="mt-3">
+      <h5>
+        <FormattedMessage
+          id="pages.Device.SoftwareUpdateTab.manualOTAUpdate"
+          defaultMessage="Manual OTA Update"
+        />
+      </h5>
+      <Alert
+        show={!!errorFeedback}
+        variant="danger"
+        onClose={() => setErrorFeedback(null)}
+        dismissible
+      >
+        {errorFeedback}
+      </Alert>
+      {currentOperation ? (
+        <div className="mt-3">
+          <FormattedMessage
+            id="pages.Device.SoftwareUpdateTab.updatingTo"
+            defaultMessage="Updating to image <a>{baseImageName}</a>"
+            values={{
+              a: (chunks: React.ReactNode) => (
+                <a
+                  target="_blank"
+                  rel="noreferrer"
+                  href={currentOperation.baseImageUrl}
+                >
+                  {chunks}
+                </a>
+              ),
+              baseImageName: currentOperation.baseImageUrl.split("/").pop(),
+            }}
+          />
+        </div>
+      ) : (
+        <BaseImageForm
+          className="mt-3"
+          onSubmit={launchManualOTAUpdate}
+          isLoading={isCreatingOtaOperation}
+        />
+      )}
+      <h5 className="mt-4">
+        <FormattedMessage
+          id="pages.Device.SoftwareUpdateTab.updatesHistory"
+          defaultMessage="History"
+        />
+      </h5>
+      <OperationTable deviceRef={device} />
+    </div>
+  );
+};
+
+type SoftwareUpdateTabProps = {
+  deviceRef: Device_otaOperations$key;
+};
+
+const SoftwareUpdateTab = ({ deviceRef }: SoftwareUpdateTabProps) => {
+  const intl = useIntl();
+
+  return (
     <Tab
       eventKey="device-software-update-tab"
       title={intl.formatMessage({
@@ -1026,55 +1105,15 @@ const SoftwareUpdateTab = ({ deviceRef }: SoftwareUpdateTabProps) => {
         defaultMessage: "Software Updates",
       })}
     >
-      <div className="mt-3">
-        <h5>
-          <FormattedMessage
-            id="pages.Device.SoftwareUpdateTab.manualOTAUpdate"
-            defaultMessage="Manual OTA Update"
-          />
-        </h5>
-        <Alert
-          show={!!errorFeedback}
-          variant="danger"
-          onClose={() => setErrorFeedback(null)}
-          dismissible
-        >
-          {errorFeedback}
-        </Alert>
-        {currentOperation ? (
-          <div className="mt-3">
-            <FormattedMessage
-              id="pages.Device.SoftwareUpdateTab.updatingTo"
-              defaultMessage="Updating to image <a>{baseImageName}</a>"
-              values={{
-                a: (chunks: React.ReactNode) => (
-                  <a
-                    target="_blank"
-                    rel="noreferrer"
-                    href={currentOperation.baseImageUrl}
-                  >
-                    {chunks}
-                  </a>
-                ),
-                baseImageName: currentOperation.baseImageUrl.split("/").pop(),
-              }}
-            />
-          </div>
-        ) : (
-          <BaseImageForm
-            className="mt-3"
-            onSubmit={launchManualOTAUpdate}
-            isLoading={isCreatingOtaOperation}
-          />
-        )}
-        <h5 className="mt-4">
-          <FormattedMessage
-            id="pages.Device.SoftwareUpdateTab.updatesHistory"
-            defaultMessage="History"
-          />
-        </h5>
-        <OperationTable deviceRef={device} />
-      </div>
+      <Suspense
+        fallback={
+          <Center data-testid="page-loading">
+            <Spinner />
+          </Center>
+        }
+      >
+        <SoftwareUpdateTabContent deviceRef={deviceRef} />
+      </Suspense>
     </Tab>
   );
 };
